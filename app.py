@@ -1,13 +1,11 @@
 import streamlit as st
 import pandas as pd
 import io
-import zipfile
 from datetime import datetime
 import re
-import openpyxl
 
 # -------------------------------------------------------------------
-# Helper: clean text (same as VBA CleanText)
+# Helper: clean text
 # -------------------------------------------------------------------
 def clean_text(val):
     if pd.isna(val):
@@ -21,18 +19,9 @@ def clean_text(val):
     return str(val).strip()
 
 # -------------------------------------------------------------------
-# Add MATCHING column (equivalent to Excel MATCH)
+# Add MATCHING column
 # -------------------------------------------------------------------
 def add_matching_columns(sheets):
-    """
-    Adds 'MATCHING' column to specified sheets based on matching rules.
-    Rules:
-      DL1    -> DL2
-      DL2    -> DL3
-      DL4 CTS -> DL4 CTS REV
-      DL4 REM -> DL5
-      DL5    -> DL6
-    """
     match_rules = [
         ("DL1", "DL2"),
         ("DL2", "DL3"),
@@ -52,18 +41,12 @@ def add_matching_columns(sheets):
                 src_df["MATCHING"] = "Target sheet empty"
             continue
 
-        # Use the first column as the key (like column A in Excel)
         key_col = src_df.columns[0]
         tgt_key_col = tgt_df.columns[0]
-
-        # Build mapping: target value -> Excel row number (index + 2)
         match_map = dict(zip(tgt_df[tgt_key_col], tgt_df.index + 2))
-
-        # Apply matching
         src_df["MATCHING"] = src_df[key_col].map(match_map)
         src_df["MATCHING"] = src_df["MATCHING"].fillna("Not found").astype(str)
 
-    # For sheets without a matching rule, add an empty MATCHING column
     for name, df in sheets.items():
         if "MATCHING" not in df.columns and not df.empty:
             df["MATCHING"] = "No rule"
@@ -71,7 +54,7 @@ def add_matching_columns(sheets):
     return sheets
 
 # -------------------------------------------------------------------
-# Main classification function
+# Main classification
 # -------------------------------------------------------------------
 def classify_rows(df):
     df_clean = df.copy()
@@ -130,6 +113,7 @@ def classify_rows(df):
     progress_bar.empty()
     status_text.empty()
 
+    # Convert to DataFrames
     for key in sheets:
         if sheets[key]:
             sheets[key] = pd.DataFrame(sheets[key])
@@ -140,18 +124,6 @@ def classify_rows(df):
     sheets = add_matching_columns(sheets)
 
     return sheets
-
-# -------------------------------------------------------------------
-# Generate ZIP with CSVs
-# -------------------------------------------------------------------
-def get_csv_zip(sheets, month_name):
-    zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        for name, df in sheets.items():
-            csv_data = df.to_csv(index=False) if not df.empty else "No data"
-            zip_file.writestr(f"{name}.csv", csv_data)
-    zip_buffer.seek(0)
-    return zip_buffer
 
 # -------------------------------------------------------------------
 # Streamlit UI
@@ -201,7 +173,7 @@ if uploaded_file is not None:
 
         st.success("Splitting complete!")
 
-        # Display sheets
+        # Display each sheet
         for sheet_name, df_sheet in sheets.items():
             with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
                 if df_sheet.empty:
@@ -209,16 +181,32 @@ if uploaded_file is not None:
                 else:
                     st.dataframe(df_sheet, use_container_width=True)
 
-        # Download as ZIP of CSVs
-        zip_buffer = get_csv_zip(sheets, selected_month)
-        st.download_button(
-            label="📥 Download all sheets as CSVs (ZIP)",
-            data=zip_buffer,
-            file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.zip",
-            mime="application/zip"
-        )
+        # Combine all sheets into one DataFrame with a "SHEET" column
+        all_data = []
+        for sheet_name, df_sheet in sheets.items():
+            if not df_sheet.empty:
+                df_copy = df_sheet.copy()
+                df_copy.insert(0, "SHEET", sheet_name)  # add SHEET column at front
+                all_data.append(df_copy)
 
-        st.info("ℹ️ CSV files are plain text and do not store font sizes. The font size is determined by your viewing software (e.g., Excel, Notepad).")
+        if all_data:
+            combined_df = pd.concat(all_data, ignore_index=True)
+
+            # Convert to CSV
+            csv_buffer = io.StringIO()
+            combined_df.to_csv(csv_buffer, index=False)
+            csv_data = csv_buffer.getvalue()
+
+            st.download_button(
+                label="📥 Download all data as one CSV",
+                data=csv_data,
+                file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.csv",
+                mime="text/csv"
+            )
+
+            st.info("ℹ️ CSV is plain text – font size is controlled by your viewing software (e.g., Excel, Notepad).")
+        else:
+            st.warning("No data to export.")
 
 else:
     st.info("Please upload an Excel file to begin.")
