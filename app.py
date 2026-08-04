@@ -99,14 +99,14 @@ def classify_rows(df):
     return sheets
 
 # -------------------------------------------------------------------
-# New function: add MATCH_STATUS column and move MATCH rows to NEW DL TYPE
+# New function: COPY MATCH rows to NEW DL TYPE (do NOT remove from source)
 # -------------------------------------------------------------------
-def add_match_and_move(sheets):
+def add_match_and_copy(sheets):
     """
     Modifies sheets in place:
       - Adds column "MATCH_STATUS" to source sheets (DL1, DL2, DL4 CTS, DL4 REM, DL5)
-      - Removes rows with "MATCH" from those sheets
-      - Collects all MATCH rows into a new sheet "NEW DL TYPE"
+      - Copies rows with "MATCH" into a new sheet "NEW DL TYPE"
+      - Original rows stay in their source sheets (no deletion)
     """
     rules = [
         ("DL1", "DL2"),
@@ -115,18 +115,21 @@ def add_match_and_move(sheets):
         ("DL4 REM", "DL5"),
         ("DL5", "DL6")
     ]
-    matched_rows = []  # will hold DataFrames of rows to move
+    matched_rows = []  # will hold DataFrames of rows to copy
 
     for src, tgt in rules:
         if src not in sheets or tgt not in sheets:
             continue
         df_src = sheets[src]
         df_tgt = sheets[tgt]
-        if df_src.empty or df_tgt.empty:
-            # If either is empty, we still add the column (all NOT MATCH) if source has rows
-            if not df_src.empty:
-                df_src["MATCH_STATUS"] = "NOT MATCH"
-                sheets[src] = df_src
+        if df_src.empty:
+            # empty source – we can still skip, but we might want to add the column anyway
+            continue
+
+        # If target is empty, all are NOT MATCH
+        if df_tgt.empty:
+            df_src["MATCH_STATUS"] = "NOT MATCH"
+            sheets[src] = df_src
             continue
 
         # Get values from the first column (column A)
@@ -136,22 +139,17 @@ def add_match_and_move(sheets):
         # Add match status
         df_src["MATCH_STATUS"] = src_vals.apply(lambda x: "MATCH" if x in tgt_vals else "NOT MATCH")
 
-        # Separate matched rows
+        # Copy matched rows (do NOT delete them from source)
         matched = df_src[df_src["MATCH_STATUS"] == "MATCH"]
         if not matched.empty:
             matched_rows.append(matched)
-            # Keep only NOT MATCH rows in source
-            df_src = df_src[df_src["MATCH_STATUS"] != "MATCH"].copy()
-            # The column stays
-            sheets[src] = df_src
-        else:
-            # No matches, but keep the column
-            sheets[src] = df_src
 
-    # Create NEW DL TYPE sheet
+        # Keep the source sheet as is (with the new column)
+        sheets[src] = df_src
+
+    # Create NEW DL TYPE sheet from all copied matches
     if matched_rows:
         new_df = pd.concat(matched_rows, ignore_index=True)
-        # Optional: add a column indicating original sheet? Not required, but we can.
         sheets["NEW DL TYPE"] = new_df
     else:
         sheets["NEW DL TYPE"] = pd.DataFrame()
@@ -210,8 +208,8 @@ if uploaded_file is not None:
     if st.button("Split Data"):
         with st.spinner("Splitting data..."):
             sheets = classify_rows(df_filtered)
-            # Apply matching and move matches
-            add_match_and_move(sheets)
+            # Apply matching and copy matches (NOT remove)
+            add_match_and_copy(sheets)
 
         st.success("Splitting complete!")
 
