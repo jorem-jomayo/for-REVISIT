@@ -2,66 +2,41 @@ import streamlit as st
 import pandas as pd
 import io
 from datetime import datetime
-import re
+import openpyxl
+from openpyxl import Workbook
+from openpyxl.utils.dataframe import dataframe_to_rows
 
 # -------------------------------------------------------------------
-# Helper: clean text
+# Helper: clean text (same as VBA CleanText)
 # -------------------------------------------------------------------
 def clean_text(val):
     if pd.isna(val):
         return ""
     if isinstance(val, str):
-        s = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', val)
+        # remove non-printable characters and trim
+        import re
+        s = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', val)  # remove control chars
         s = s.strip()
+        # replace multiple spaces
         while "  " in s:
             s = s.replace("  ", " ")
         return s
     return str(val).strip()
 
 # -------------------------------------------------------------------
-# Add MATCHING column (Excel-style MATCH)
-# -------------------------------------------------------------------
-def add_matching_columns(sheets):
-    match_rules = [
-        ("DL1", "DL2"),
-        ("DL2", "DL3"),
-        ("DL4 CTS", "DL4 CTS REV"),
-        ("DL4 REM", "DL5"),
-        ("DL5", "DL6"),
-    ]
-
-    for src_name, tgt_name in match_rules:
-        src_df = sheets.get(src_name)
-        tgt_df = sheets.get(tgt_name)
-
-        if src_df is None or tgt_df is None:
-            continue
-        if src_df.empty or tgt_df.empty:
-            if not src_df.empty:
-                src_df["MATCHING"] = "Target sheet empty"
-            continue
-
-        key_col = src_df.columns[0]
-        tgt_key_col = tgt_df.columns[0]
-        match_map = dict(zip(tgt_df[tgt_key_col], tgt_df.index + 2))
-        src_df["MATCHING"] = src_df[key_col].map(match_map)
-        src_df["MATCHING"] = src_df["MATCHING"].fillna("Not found").astype(str)
-
-    for name, df in sheets.items():
-        if "MATCHING" not in df.columns and not df.empty:
-            df["MATCHING"] = "No rule"
-
-    return sheets
-
-# -------------------------------------------------------------------
-# Main classification
+# Main classification function
 # -------------------------------------------------------------------
 def classify_rows(df):
-    df_clean = df.copy()
-    df_clean["DL TYPE"] = df_clean["DL TYPE"].apply(clean_text).str.upper()
-    df_clean["ACCOUNT TYPE"] = df_clean["ACCOUNT TYPE"].apply(clean_text).str.upper()
-    df_clean["REMARKS"] = df_clean["REMARKS"].apply(clean_text).str.upper()
+    """
+    Takes a DataFrame with columns: "DL TYPE", "ACCOUNT TYPE", "REMARKS"
+    Returns a dict with sheet names as keys and DataFrames as values.
+    """
+    # Clean the three key columns
+    df["DL TYPE"] = df["DL TYPE"].apply(clean_text).str.upper()
+    df["ACCOUNT TYPE"] = df["ACCOUNT TYPE"].apply(clean_text).str.upper()
+    df["REMARKS"] = df["REMARKS"].apply(clean_text).str.upper()
 
+    # Initialize result dictionary
     sheets = {
         "DL1": [],
         "DL2": [],
@@ -73,11 +48,11 @@ def classify_rows(df):
         "DL6": []
     }
 
-    total = len(df_clean)
-    progress_bar = st.progress(0, text="Starting...")
+    total = len(df)
+    progress_bar = st.progress(0, text="Processing rows...")
     status_text = st.empty()
 
-    for idx, (_, row) in enumerate(df_clean.iterrows()):
+    for idx, (_, row) in enumerate(df.iterrows()):
         dl_type = row["DL TYPE"]
         acc_type = row["ACCOUNT TYPE"]
         remarks = row["REMARKS"]
@@ -105,6 +80,7 @@ def classify_rows(df):
         if dest is not None:
             sheets[dest].append(row)
 
+        # Update progress
         if (idx + 1) % 10 == 0 or idx + 1 == total:
             progress = (idx + 1) / total
             progress_bar.progress(progress, text=f"Processing row {idx+1} of {total}")
@@ -113,24 +89,25 @@ def classify_rows(df):
     progress_bar.empty()
     status_text.empty()
 
+    # Convert lists to DataFrames
     for key in sheets:
         if sheets[key]:
             sheets[key] = pd.DataFrame(sheets[key])
         else:
-            sheets[key] = pd.DataFrame()
+            sheets[key] = pd.DataFrame()  # empty DataFrame
 
-    sheets = add_matching_columns(sheets)
     return sheets
 
 # -------------------------------------------------------------------
 # Streamlit UI
 # -------------------------------------------------------------------
 st.set_page_config(page_title="PEN RATE Splitter", layout="wide")
-st.title("📊 PEN RATE – Split by DL TYPE + MATCHING column")
+st.title("📊 PEN RATE – Split by DL TYPE")
 
 uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
 if uploaded_file is not None:
+    # Read the Excel file
     try:
         df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
         st.success("File loaded successfully!")
@@ -138,24 +115,31 @@ if uploaded_file is not None:
         st.error(f"Error reading file: {e}")
         st.stop()
 
+    # Check required columns
     required_cols = ["DL TYPE", "ACCOUNT TYPE", "REMARKS", "ENDO DATE"]
     missing = [col for col in required_cols if col not in df_raw.columns]
     if missing:
         st.error(f"Missing columns: {missing}")
         st.stop()
 
+    # Convert ENDO DATE to datetime (if not already)
     df_raw["ENDO DATE"] = pd.to_datetime(df_raw["ENDO DATE"], errors="coerce")
-    df_raw["MONTH_YEAR"] = df_raw["ENDO DATE"].dt.strftime("%B %Y")
 
+    # Create a month-year column for filtering
+    df_raw["MONTH_YEAR"] = df_raw["ENDO DATE"].dt.strftime("%B %Y")  # e.g., "July 2026"
+
+    # Drop rows with invalid dates
     df_valid = df_raw.dropna(subset=["ENDO DATE"]).copy()
 
     if df_valid.empty:
-        st.warning("No valid ENDO DATE found.")
+        st.warning("No valid ENDO DATE found. Please check your data.")
         st.stop()
 
+    # Get unique month-year values, sorted chronologically
     unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
     selected_month = st.selectbox("Select ENDO DATE month", unique_months)
 
+    # Filter data by selected month
     df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
 
     if df_filtered.empty:
@@ -164,13 +148,14 @@ if uploaded_file is not None:
 
     st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
+    # Button to trigger splitting
     if st.button("Split Data"):
         with st.spinner("Splitting data..."):
             sheets = classify_rows(df_filtered)
 
         st.success("Splitting complete!")
 
-        # ----- Display each sheet -----
+        # Display each sheet in an expander
         for sheet_name, df_sheet in sheets.items():
             with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
                 if df_sheet.empty:
@@ -178,50 +163,23 @@ if uploaded_file is not None:
                 else:
                     st.dataframe(df_sheet, use_container_width=True)
 
-        # ----- Download options -----
-        col1, col2 = st.columns(2)
-
-        # Option 1: Single CSV with SHEET column
-        all_data = []
-        for sheet_name, df_sheet in sheets.items():
-            if not df_sheet.empty:
-                df_copy = df_sheet.copy()
-                df_copy.insert(0, "SHEET", sheet_name)
-                all_data.append(df_copy)
-
-        if all_data:
-            combined_df = pd.concat(all_data, ignore_index=True)
-            csv_buffer = io.StringIO()
-            combined_df.to_csv(csv_buffer, index=False)
-            csv_data = csv_buffer.getvalue()
-
-            with col1:
-                st.download_button(
-                    label="📥 Download as single CSV (with SHEET column)",
-                    data=csv_data,
-                    file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.csv",
-                    mime="text/csv"
-                )
-
-        # Option 2: Excel file with multiple sheets
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        # Offer download as single Excel file with multiple sheets
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
             for sheet_name, df_sheet in sheets.items():
                 if not df_sheet.empty:
                     df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
                 else:
+                    # Write an empty sheet with just a note
                     pd.DataFrame({"Note": ["No data"]}).to_excel(writer, sheet_name=sheet_name, index=False)
-        excel_buffer.seek(0)
+        output.seek(0)
 
-        with col2:
-            st.download_button(
-                label="📥 Download as Excel (multi‑sheet)",
-                data=excel_buffer,
-                file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-        st.info("ℹ️ **CSV** is plain text – font size is controlled by your viewer. **Excel** file preserves sheet structure.")
+        st.download_button(
+            label="📥 Download Split File (Excel)",
+            data=output,
+            file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
 
 else:
     st.info("Please upload an Excel file to begin.")
