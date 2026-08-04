@@ -5,7 +5,7 @@ from datetime import datetime
 import re
 
 # -------------------------------------------------------------------
-# Helper: clean text (removes hidden chars and extra spaces)
+# Helper: clean text
 # -------------------------------------------------------------------
 def clean_text(val):
     if pd.isna(val):
@@ -41,17 +41,12 @@ def add_matching_columns(sheets):
                 src_df["MATCHING"] = "Target sheet empty"
             continue
 
-        # Use the first column as the key (like column A in Excel)
         key_col = src_df.columns[0]
         tgt_key_col = tgt_df.columns[0]
-
-        # Map target values to Excel row numbers (index + 2)
         match_map = dict(zip(tgt_df[tgt_key_col], tgt_df.index + 2))
-
         src_df["MATCHING"] = src_df[key_col].map(match_map)
         src_df["MATCHING"] = src_df["MATCHING"].fillna("Not found").astype(str)
 
-    # For sheets without a matching rule, add an empty MATCHING column
     for name, df in sheets.items():
         if "MATCHING" not in df.columns and not df.empty:
             df["MATCHING"] = "No rule"
@@ -59,7 +54,7 @@ def add_matching_columns(sheets):
     return sheets
 
 # -------------------------------------------------------------------
-# Main classification function (splits into sheets)
+# Main classification
 # -------------------------------------------------------------------
 def classify_rows(df):
     df_clean = df.copy()
@@ -118,16 +113,13 @@ def classify_rows(df):
     progress_bar.empty()
     status_text.empty()
 
-    # Convert lists to DataFrames
     for key in sheets:
         if sheets[key]:
             sheets[key] = pd.DataFrame(sheets[key])
         else:
             sheets[key] = pd.DataFrame()
 
-    # Add MATCHING columns
     sheets = add_matching_columns(sheets)
-
     return sheets
 
 # -------------------------------------------------------------------
@@ -178,7 +170,7 @@ if uploaded_file is not None:
 
         st.success("Splitting complete!")
 
-        # ---------- Show each sheet in its own expander ----------
+        # ----- Display each sheet -----
         for sheet_name, df_sheet in sheets.items():
             with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
                 if df_sheet.empty:
@@ -186,32 +178,50 @@ if uploaded_file is not None:
                 else:
                     st.dataframe(df_sheet, use_container_width=True)
 
-        # ---------- Combine all sheets into one CSV ----------
+        # ----- Download options -----
+        col1, col2 = st.columns(2)
+
+        # Option 1: Single CSV with SHEET column
         all_data = []
         for sheet_name, df_sheet in sheets.items():
             if not df_sheet.empty:
                 df_copy = df_sheet.copy()
-                df_copy.insert(0, "SHEET", sheet_name)   # Add sheet name as first column
+                df_copy.insert(0, "SHEET", sheet_name)
                 all_data.append(df_copy)
 
         if all_data:
             combined_df = pd.concat(all_data, ignore_index=True)
-
-            # Convert to CSV
             csv_buffer = io.StringIO()
             combined_df.to_csv(csv_buffer, index=False)
             csv_data = csv_buffer.getvalue()
 
+            with col1:
+                st.download_button(
+                    label="📥 Download as single CSV (with SHEET column)",
+                    data=csv_data,
+                    file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.csv",
+                    mime="text/csv"
+                )
+
+        # Option 2: Excel file with multiple sheets
+        excel_buffer = io.BytesIO()
+        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+            for sheet_name, df_sheet in sheets.items():
+                if not df_sheet.empty:
+                    df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+                else:
+                    pd.DataFrame({"Note": ["No data"]}).to_excel(writer, sheet_name=sheet_name, index=False)
+        excel_buffer.seek(0)
+
+        with col2:
             st.download_button(
-                label="📥 Download all data as one CSV",
-                data=csv_data,
-                file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.csv",
-                mime="text/csv"
+                label="📥 Download as Excel (multi‑sheet)",
+                data=excel_buffer,
+                file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-            st.info("ℹ️ CSV is plain text – font size is controlled by your viewing software (e.g., Excel, Notepad).")
-        else:
-            st.warning("No data to export.")
+        st.info("ℹ️ **CSV** is plain text – font size is controlled by your viewer. **Excel** file preserves sheet structure.")
 
 else:
     st.info("Please upload an Excel file to begin.")
