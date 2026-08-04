@@ -177,6 +177,7 @@ def add_match_and_copy(sheets, include_dl6=False):
 # -------------------------------------------------------------------
 st.set_page_config(page_title="PEN RATE Splitter", layout="wide")
 st.title("🆕 for NEW DL TYPE - NEW ENDO")
+page_icon="🆕"
 
 uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
