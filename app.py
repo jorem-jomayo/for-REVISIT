@@ -100,37 +100,39 @@ def classify_rows(df):
 
 # -------------------------------------------------------------------
 # New function: copy NOT MATCH rows to NEW DL TYPE, add destination column
-# Now with optional inclusion of DL6 matching against DL1
+# Now with optional inclusion of DL6 as a source sheet (matches against DL1)
 # -------------------------------------------------------------------
-def add_match_and_copy(sheets, include_dl6=False):
+def add_match_and_copy(sheets, include_dl6_source=False):
     """
     Modifies sheets in place:
-      - Adds column "MATCH_STATUS" to source sheets (DL1, DL2, DL4 CTS, DL4 REM, DL5)
+      - Always runs: DL1→DL2, DL2→DL3, DL4 CTS→DL4 CTS REV, DL4 REM→DL5, DL5→DL6
+      - Adds column "MATCH_STATUS" to those source sheets
       - Adds column "FOR_NEW_DL_TYPE" with destination label for NOT MATCH rows
       - Copies ONLY the NOT MATCH rows into a new sheet "NEW DL TYPE"
       - Original rows stay in their source sheets (no deletion)
-      - If include_dl6 is True, also processes DL6 (matches against DL1)
+      - If include_dl6_source is True, also processes DL6 as a source:
+          - adds MATCH_STATUS and FOR_NEW_DL_TYPE to DL6 (matching against DL1)
+          - copies DL6's NOT MATCH rows to NEW DL TYPE
     """
-    # Base rules: (source, target, destination_label_for_not_match)
+    # Base rules - always applied
     rules = [
         ("DL1", "DL2", "FOR DL2"),
         ("DL2", "DL3", "FOR DL3"),
         ("DL4 CTS", "DL4 CTS REV", "FOR DL4"),
         ("DL4 REM", "DL5", "FOR DL5"),
-        ("DL5", "DL6", "FOR DL6")
+        ("DL5", "DL6", "FOR DL6")   # DL5 always matches against DL6
     ]
 
-    # Optionally add DL6 rule (match DL6 against DL1)
-    if include_dl6:
+    # Optionally add DL6 as a source (matching against DL1)
+    if include_dl6_source:
         rules.append(("DL6", "DL1", "FOR DL1"))
 
-    # First, compute total rows that will be processed across all source sheets
+    # Compute total rows to process for progress
     total_rows = 0
     for src, _, _ in rules:
         if src in sheets:
             total_rows += len(sheets[src])
     if total_rows == 0:
-        # Nothing to match
         sheets["NEW DL TYPE"] = pd.DataFrame()
         return
 
@@ -153,7 +155,6 @@ def add_match_and_copy(sheets, include_dl6=False):
         if df_tgt.empty:
             df_src["MATCH_STATUS"] = "NOT MATCH"
             df_src["FOR_NEW_DL_TYPE"] = dest_label   # all rows get this label
-            # Copy all rows as NOT MATCH
             not_matched_rows.append(df_src.copy())
             sheets[src] = df_src
             processed += len(df_src)
@@ -187,7 +188,6 @@ def add_match_and_copy(sheets, include_dl6=False):
         progress_bar.progress(progress, text=f"Matching rows... {processed}/{total_rows}")
         status_text.text(f"Matched {processed} rows...")
 
-    # Clear progress indicators
     progress_bar.empty()
     status_text.empty()
 
@@ -248,15 +248,18 @@ if uploaded_file is not None:
 
     st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-    # ---- New: checkbox to include DL6 in matching ----
-    include_dl6 = st.checkbox("Include DL6 in matching (match DL6 against DL1)")
+    # ---- Checkbox: process DL6 as a source sheet (adds match status and copies its NOT MATCH rows) ----
+    include_dl6 = st.checkbox(
+        "Also process DL6 as a source sheet (match DL6 against DL1)",
+        help="If checked, DL6 gets MATCH_STATUS and FOR_NEW_DL_TYPE columns, and its NOT MATCH rows are copied to NEW DL TYPE. "
+             "DL5→DL6 matching always runs regardless."
+    )
 
     # Button to trigger splitting
     if st.button("Split Data"):
         with st.spinner("Processing..."):
             sheets = classify_rows(df_filtered)
-            # Apply matching and copy NOT MATCH rows, passing the checkbox value
-            add_match_and_copy(sheets, include_dl6=include_dl6)
+            add_match_and_copy(sheets, include_dl6_source=include_dl6)
 
         st.success("Processing complete!")
 
