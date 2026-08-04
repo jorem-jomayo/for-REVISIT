@@ -99,6 +99,64 @@ def classify_rows(df):
     return sheets
 
 # -------------------------------------------------------------------
+# New function: add MATCH_STATUS column and move MATCH rows to NEW DL TYPE
+# -------------------------------------------------------------------
+def add_match_and_move(sheets):
+    """
+    Modifies sheets in place:
+      - Adds column "MATCH_STATUS" to source sheets (DL1, DL2, DL4 CTS, DL4 REM, DL5)
+      - Removes rows with "MATCH" from those sheets
+      - Collects all MATCH rows into a new sheet "NEW DL TYPE"
+    """
+    rules = [
+        ("DL1", "DL2"),
+        ("DL2", "DL3"),
+        ("DL4 CTS", "DL4 CTS REV"),
+        ("DL4 REM", "DL5"),
+        ("DL5", "DL6")
+    ]
+    matched_rows = []  # will hold DataFrames of rows to move
+
+    for src, tgt in rules:
+        if src not in sheets or tgt not in sheets:
+            continue
+        df_src = sheets[src]
+        df_tgt = sheets[tgt]
+        if df_src.empty or df_tgt.empty:
+            # If either is empty, we still add the column (all NOT MATCH) if source has rows
+            if not df_src.empty:
+                df_src["MATCH_STATUS"] = "NOT MATCH"
+                sheets[src] = df_src
+            continue
+
+        # Get values from the first column (column A)
+        src_vals = df_src.iloc[:, 0]
+        tgt_vals = set(df_tgt.iloc[:, 0].dropna().unique())
+
+        # Add match status
+        df_src["MATCH_STATUS"] = src_vals.apply(lambda x: "MATCH" if x in tgt_vals else "NOT MATCH")
+
+        # Separate matched rows
+        matched = df_src[df_src["MATCH_STATUS"] == "MATCH"]
+        if not matched.empty:
+            matched_rows.append(matched)
+            # Keep only NOT MATCH rows in source
+            df_src = df_src[df_src["MATCH_STATUS"] != "MATCH"].copy()
+            # The column stays
+            sheets[src] = df_src
+        else:
+            # No matches, but keep the column
+            sheets[src] = df_src
+
+    # Create NEW DL TYPE sheet
+    if matched_rows:
+        new_df = pd.concat(matched_rows, ignore_index=True)
+        # Optional: add a column indicating original sheet? Not required, but we can.
+        sheets["NEW DL TYPE"] = new_df
+    else:
+        sheets["NEW DL TYPE"] = pd.DataFrame()
+
+# -------------------------------------------------------------------
 # Streamlit UI
 # -------------------------------------------------------------------
 st.set_page_config(page_title="PEN RATE Splitter", layout="wide")
@@ -152,6 +210,8 @@ if uploaded_file is not None:
     if st.button("Split Data"):
         with st.spinner("Splitting data..."):
             sheets = classify_rows(df_filtered)
+            # Apply matching and move matches
+            add_match_and_move(sheets)
 
         st.success("Splitting complete!")
 
