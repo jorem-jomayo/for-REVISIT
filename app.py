@@ -49,7 +49,7 @@ def classify_rows(df):
     }
 
     total = len(df)
-    progress_bar = st.progress(0, text="Processing rows...")
+    progress_bar = st.progress(0, text="Classifying rows...")
     status_text = st.empty()
 
     for idx, (_, row) in enumerate(df.iterrows()):
@@ -83,8 +83,8 @@ def classify_rows(df):
         # Update progress
         if (idx + 1) % 10 == 0 or idx + 1 == total:
             progress = (idx + 1) / total
-            progress_bar.progress(progress, text=f"Processing row {idx+1} of {total}")
-            status_text.text(f"Processed {idx+1} rows...")
+            progress_bar.progress(progress, text=f"Classifying row {idx+1} of {total}")
+            status_text.text(f"Classified {idx+1} rows...")
 
     progress_bar.empty()
     status_text.empty()
@@ -99,7 +99,8 @@ def classify_rows(df):
     return sheets
 
 # -------------------------------------------------------------------
-# New function: COPY MATCH rows to NEW DL TYPE (do NOT remove from source)
+# Function: COPY MATCH rows to NEW DL TYPE (do NOT remove from source)
+# with progress bar
 # -------------------------------------------------------------------
 def add_match_and_copy(sheets):
     """
@@ -115,21 +116,43 @@ def add_match_and_copy(sheets):
         ("DL4 REM", "DL5"),
         ("DL5", "DL6")
     ]
+
+    # First, compute total rows that will be processed across all source sheets
+    total_rows = 0
+    for src, _ in rules:
+        if src in sheets:
+            total_rows += len(sheets[src])
+    if total_rows == 0:
+        # Nothing to match
+        sheets["NEW DL TYPE"] = pd.DataFrame()
+        return
+
     matched_rows = []  # will hold DataFrames of rows to copy
+
+    progress_bar = st.progress(0, text="Matching rows...")
+    status_text = st.empty()
+    processed = 0
 
     for src, tgt in rules:
         if src not in sheets or tgt not in sheets:
+            # Still count as processed? no, we skip
             continue
         df_src = sheets[src]
         df_tgt = sheets[tgt]
         if df_src.empty:
-            # empty source – we can still skip, but we might want to add the column anyway
+            # No rows to process, but we still count them as processed (0)
+            # update progress anyway
+            processed += 0  # no change
             continue
 
         # If target is empty, all are NOT MATCH
         if df_tgt.empty:
             df_src["MATCH_STATUS"] = "NOT MATCH"
             sheets[src] = df_src
+            processed += len(df_src)
+            progress = processed / total_rows
+            progress_bar.progress(progress, text=f"Matching rows... {processed}/{total_rows}")
+            status_text.text(f"Matched {processed} rows...")
             continue
 
         # Get values from the first column (column A)
@@ -146,6 +169,16 @@ def add_match_and_copy(sheets):
 
         # Keep the source sheet as is (with the new column)
         sheets[src] = df_src
+
+        # Update progress
+        processed += len(df_src)
+        progress = min(processed / total_rows, 1.0)
+        progress_bar.progress(progress, text=f"Matching rows... {processed}/{total_rows}")
+        status_text.text(f"Matched {processed} rows...")
+
+    # Clear progress indicators
+    progress_bar.empty()
+    status_text.empty()
 
     # Create NEW DL TYPE sheet from all copied matches
     if matched_rows:
@@ -206,12 +239,12 @@ if uploaded_file is not None:
 
     # Button to trigger splitting
     if st.button("Split Data"):
-        with st.spinner("Splitting data..."):
+        with st.spinner("Processing..."):
             sheets = classify_rows(df_filtered)
-            # Apply matching and copy matches (NOT remove)
+            # Apply matching and copy matches (do NOT remove)
             add_match_and_copy(sheets)
 
-        st.success("Splitting complete!")
+        st.success("Processing complete!")
 
         # Display each sheet in an expander
         for sheet_name, df_sheet in sheets.items():
