@@ -7,7 +7,7 @@ from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
 
 # -------------------------------------------------------------------
-# Helper: clean text (same as VBA CleanText)
+# Helper: clean text
 # -------------------------------------------------------------------
 def clean_text(val):
     if pd.isna(val):
@@ -89,14 +89,15 @@ def classify_rows(df):
 
 # -------------------------------------------------------------------
 # Matching + copying NOT MATCH rows to NEW DL TYPE
-# The checkbox `include_dl6` controls whether DL6 is involved at all
+# The checkbox `include_dl6` controls whether DL5 is matched against DL6
+# DL6 is always the final target – never a source
 # -------------------------------------------------------------------
 def add_match_and_copy(sheets, include_dl6=False):
     """
     Base rules (always applied):
         DL1 → DL2,  DL2 → DL3,  DL4 CTS → DL4 CTS REV,  DL4 REM → DL5
     If include_dl6 is True, also add:
-        DL5 → DL6,  DL6 → DL1
+        DL5 → DL6   (DL6 is target only, never source)
     """
     rules = [
         ("DL1", "DL2", "FOR DL2"),
@@ -107,7 +108,7 @@ def add_match_and_copy(sheets, include_dl6=False):
 
     if include_dl6:
         rules.append(("DL5", "DL6", "FOR DL6"))
-        rules.append(("DL6", "DL1", "FOR DL1"))
+        # Note: DL6 is NOT matched against DL1 – it's the last target
 
     # Compute total rows for progress
     total_rows = 0
@@ -212,12 +213,12 @@ if uploaded_file is not None:
 
     st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-    # Checkbox: include DL6 in the matching chain
+    # Checkbox: include DL5→DL6 matching (DL6 is target only)
     include_dl6 = st.checkbox(
-        "Include DL6 in matching (DL5 → DL6 and DL6 → DL1)",
-        help="When checked, DL5 matches against DL6, and DL6 matches against DL1. "
-             "Their NOT MATCH rows will appear in NEW DL TYPE with FOR DL6 / FOR DL1 labels. "
-             "When unchecked, DL5 and DL6 are kept as plain sheets without extra columns."
+        "Include DL5 → DL6 matching",
+        help="When checked, DL5 rows are matched against DL6. "
+             "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
+             "When unchecked, DL5 remains a plain sheet without extra columns."
     )
 
     if st.button("Split Data"):
