@@ -99,27 +99,28 @@ def classify_rows(df):
     return sheets
 
 # -------------------------------------------------------------------
-# Function: COPY MATCH rows to NEW DL TYPE (do NOT remove from source)
-# with progress bar
+# New function: copy NOT MATCH rows to NEW DL TYPE, add destination column
 # -------------------------------------------------------------------
 def add_match_and_copy(sheets):
     """
     Modifies sheets in place:
       - Adds column "MATCH_STATUS" to source sheets (DL1, DL2, DL4 CTS, DL4 REM, DL5)
-      - Copies rows with "MATCH" into a new sheet "NEW DL TYPE"
+      - Adds column "FOR_NEW_DL_TYPE" with destination label for NOT MATCH rows
+      - Copies ONLY the NOT MATCH rows into a new sheet "NEW DL TYPE"
       - Original rows stay in their source sheets (no deletion)
     """
+    # Define rules: (source, target, destination_label_for_not_match)
     rules = [
-        ("DL1", "DL2"),
-        ("DL2", "DL3"),
-        ("DL4 CTS", "DL4 CTS REV"),
-        ("DL4 REM", "DL5"),
-        ("DL5", "DL6")
+        ("DL1", "DL2", "FOR DL2"),
+        ("DL2", "DL3", "FOR DL3"),
+        ("DL4 CTS", "DL4 CTS REV", "FOR DL4"),   # as per user request
+        ("DL4 REM", "DL5", "FOR DL5"),
+        ("DL5", "DL6", "FOR DL6")
     ]
 
     # First, compute total rows that will be processed across all source sheets
     total_rows = 0
-    for src, _ in rules:
+    for src, _, _ in rules:
         if src in sheets:
             total_rows += len(sheets[src])
     if total_rows == 0:
@@ -127,27 +128,27 @@ def add_match_and_copy(sheets):
         sheets["NEW DL TYPE"] = pd.DataFrame()
         return
 
-    matched_rows = []  # will hold DataFrames of rows to copy
+    not_matched_rows = []  # will hold DataFrames of NOT MATCH rows (to copy)
 
     progress_bar = st.progress(0, text="Matching rows...")
     status_text = st.empty()
     processed = 0
 
-    for src, tgt in rules:
+    for src, tgt, dest_label in rules:
         if src not in sheets or tgt not in sheets:
-            # Still count as processed? no, we skip
             continue
         df_src = sheets[src]
         df_tgt = sheets[tgt]
         if df_src.empty:
-            # No rows to process, but we still count them as processed (0)
-            # update progress anyway
-            processed += 0  # no change
+            processed += len(df_src)  # 0
             continue
 
-        # If target is empty, all are NOT MATCH
+        # If target is empty, all rows are NOT MATCH
         if df_tgt.empty:
             df_src["MATCH_STATUS"] = "NOT MATCH"
+            df_src["FOR_NEW_DL_TYPE"] = dest_label   # all rows get this label
+            # Copy all rows as NOT MATCH
+            not_matched_rows.append(df_src.copy())
             sheets[src] = df_src
             processed += len(df_src)
             progress = processed / total_rows
@@ -161,13 +162,18 @@ def add_match_and_copy(sheets):
 
         # Add match status
         df_src["MATCH_STATUS"] = src_vals.apply(lambda x: "MATCH" if x in tgt_vals else "NOT MATCH")
+        # Add destination column: for NOT MATCH rows, set to dest_label; for MATCH rows, set to empty or "MATCHED"?
+        # We'll set it to dest_label for NOT MATCH, and "" for MATCH
+        df_src["FOR_NEW_DL_TYPE"] = df_src["MATCH_STATUS"].apply(
+            lambda status: dest_label if status == "NOT MATCH" else ""
+        )
 
-        # Copy matched rows (do NOT delete them from source)
-        matched = df_src[df_src["MATCH_STATUS"] == "MATCH"]
-        if not matched.empty:
-            matched_rows.append(matched)
+        # Copy only NOT MATCH rows
+        not_matched = df_src[df_src["MATCH_STATUS"] == "NOT MATCH"]
+        if not not_matched.empty:
+            not_matched_rows.append(not_matched.copy())
 
-        # Keep the source sheet as is (with the new column)
+        # Keep the source sheet as is (with both new columns)
         sheets[src] = df_src
 
         # Update progress
@@ -180,9 +186,9 @@ def add_match_and_copy(sheets):
     progress_bar.empty()
     status_text.empty()
 
-    # Create NEW DL TYPE sheet from all copied matches
-    if matched_rows:
-        new_df = pd.concat(matched_rows, ignore_index=True)
+    # Create NEW DL TYPE sheet from all copied NOT MATCH rows
+    if not_matched_rows:
+        new_df = pd.concat(not_matched_rows, ignore_index=True)
         sheets["NEW DL TYPE"] = new_df
     else:
         sheets["NEW DL TYPE"] = pd.DataFrame()
@@ -241,7 +247,7 @@ if uploaded_file is not None:
     if st.button("Split Data"):
         with st.spinner("Processing..."):
             sheets = classify_rows(df_filtered)
-            # Apply matching and copy matches (do NOT remove)
+            # Apply matching and copy NOT MATCH rows
             add_match_and_copy(sheets)
 
         st.success("Processing complete!")
