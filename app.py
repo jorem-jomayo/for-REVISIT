@@ -41,8 +41,9 @@ def classify_rows(df):
     }
 
     total = len(df)
-    progress_bar = st.progress(0, text="Classifying rows...")
-    status_text = st.empty()
+    # Use sidebar for progress
+    progress_bar = st.sidebar.progress(0, text="Classifying rows...")
+    status_text = st.sidebar.empty()
 
     for idx, (_, row) in enumerate(df.iterrows()):
         dl_type = row["DL TYPE"]
@@ -120,8 +121,9 @@ def add_match_and_copy(sheets, include_dl6=False):
         return
 
     not_matched_rows = []
-    progress_bar = st.progress(0, text="Matching rows...")
-    status_text = st.empty()
+    # Use sidebar for progress
+    progress_bar = st.sidebar.progress(0, text="Matching rows...")
+    status_text = st.sidebar.empty()
     processed = 0
 
     for src, tgt, dest_label in rules:
@@ -175,81 +177,112 @@ def add_match_and_copy(sheets, include_dl6=False):
 # -------------------------------------------------------------------
 # Streamlit UI
 # -------------------------------------------------------------------
-st.set_page_config(page_title="NEW DL TYPE", layout="wide",page_icon="🆕")
-st.title("🆕 for NEW DL TYPE - NEW ENDO")
+st.set_page_config(page_title="NEW DL TYPE - NEW ENDO", layout="wide", page_icon="🆕")
 
-uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
+# -------------------- SIDEBAR --------------------
+with st.sidebar:
+    st.title("🆕 NEW DL TYPE")
+    st.subheader("NEW ENDO Process")
 
-if uploaded_file is not None:
-    try:
-        df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
-        st.success("File loaded successfully!")
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
-        st.stop()
+    st.markdown("---")
+    st.markdown("**Step 1: Upload File**")
+    uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
-    required_cols = ["DL TYPE", "ACCOUNT TYPE", "REMARKS", "ENDO DATE"]
-    missing = [col for col in required_cols if col not in df_raw.columns]
-    if missing:
-        st.error(f"Missing columns: {missing}")
-        st.stop()
+    if uploaded_file is not None:
+        st.markdown("**Step 2: Select Month**")
+        # Load and filter data will happen below, but we need to keep the file in session?
+        # We'll process after upload and selection, but we need to keep the loaded df in session state.
+        # For simplicity, we'll load it once and store in session_state.
+        if "df_raw" not in st.session_state or st.session_state.get("uploaded_file_name") != uploaded_file.name:
+            try:
+                df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
+                st.session_state.df_raw = df_raw
+                st.session_state.uploaded_file_name = uploaded_file.name
+                st.success("File loaded successfully!")
+            except Exception as e:
+                st.error(f"Error reading file: {e}")
+                st.stop()
+        else:
+            df_raw = st.session_state.df_raw
 
-    df_raw["ENDO DATE"] = pd.to_datetime(df_raw["ENDO DATE"], errors="coerce")
-    df_raw["MONTH_YEAR"] = df_raw["ENDO DATE"].dt.strftime("%B %Y")
-    df_valid = df_raw.dropna(subset=["ENDO DATE"]).copy()
+        required_cols = ["DL TYPE", "ACCOUNT TYPE", "REMARKS", "ENDO DATE"]
+        missing = [col for col in required_cols if col not in df_raw.columns]
+        if missing:
+            st.error(f"Missing columns: {missing}")
+            st.stop()
 
-    if df_valid.empty:
-        st.warning("No valid ENDO DATE found. Please check your data.")
-        st.stop()
+        df_raw["ENDO DATE"] = pd.to_datetime(df_raw["ENDO DATE"], errors="coerce")
+        df_raw["MONTH_YEAR"] = df_raw["ENDO DATE"].dt.strftime("%B %Y")
+        df_valid = df_raw.dropna(subset=["ENDO DATE"]).copy()
 
-    unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
-    selected_month = st.selectbox("Select ENDO DATE month", unique_months)
+        if df_valid.empty:
+            st.warning("No valid ENDO DATE found. Please check your data.")
+            st.stop()
 
-    df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
+        unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
+        selected_month = st.selectbox("Select ENDO DATE month", unique_months)
 
-    if df_filtered.empty:
-        st.info(f"No data for {selected_month}.")
-        st.stop()
+        df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
 
-    st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
+        if df_filtered.empty:
+            st.info(f"No data for {selected_month}.")
+            st.stop()
 
-    # Checkbox: include DL5→DL6 matching (DL6 is target only)
-    include_dl6 = st.checkbox(
-        "Include DL5 → DL6 matching",
-        help="When checked, DL5 rows are matched against DL6. "
-             "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
-             "When unchecked, DL5 remains a plain sheet without extra columns."
-    )
+        # Show row count in sidebar
+        st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-    if st.button("Split Data"):
-        with st.spinner("Processing..."):
-            sheets = classify_rows(df_filtered)
-            add_match_and_copy(sheets, include_dl6=include_dl6)
-
-        st.success("Processing complete!")
-
-        for sheet_name, df_sheet in sheets.items():
-            with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
-                if df_sheet.empty:
-                    st.write("No data.")
-                else:
-                    st.dataframe(df_sheet, use_container_width=True)
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            for sheet_name, df_sheet in sheets.items():
-                if not df_sheet.empty:
-                    df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
-                else:
-                    pd.DataFrame({"Note": ["No data"]}).to_excel(writer, sheet_name=sheet_name, index=False)
-        output.seek(0)
-
-        st.download_button(
-            label="📥 Download Split File (Excel)",
-            data=output,
-            file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        st.markdown("**Step 3: Options**")
+        include_dl6 = st.checkbox(
+            "Include DL5 → DL6 matching",
+            help="When checked, DL5 rows are matched against DL6. "
+                 "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
+                 "When unchecked, DL5 remains a plain sheet without extra columns."
         )
 
+        st.markdown("**Step 4: Run Processing**")
+        if st.button("Split Data", use_container_width=True):
+            with st.spinner("Processing..."):
+                sheets = classify_rows(df_filtered)
+                add_match_and_copy(sheets, include_dl6=include_dl6)
+
+            # Store sheets in session state for display and download
+            st.session_state.sheets = sheets
+            st.session_state.selected_month = selected_month
+            st.success("Processing complete!")
+
+    else:
+        st.info("Please upload an Excel file to begin.")
+
+# -------------------- MAIN AREA --------------------
+st.title("📊 Split Results")
+
+if "sheets" in st.session_state and st.session_state.sheets is not None:
+    sheets = st.session_state.sheets
+    selected_month = st.session_state.selected_month
+
+    for sheet_name, df_sheet in sheets.items():
+        with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
+            if df_sheet.empty:
+                st.write("No data.")
+            else:
+                st.dataframe(df_sheet, use_container_width=True)
+
+    # Download button in main area
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        for sheet_name, df_sheet in sheets.items():
+            if not df_sheet.empty:
+                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+            else:
+                pd.DataFrame({"Note": ["No data"]}).to_excel(writer, sheet_name=sheet_name, index=False)
+    output.seek(0)
+
+    st.download_button(
+        label="📥 Download Split File (Excel)",
+        data=output,
+        file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+    )
 else:
-    st.info("Please upload an Excel file to begin.")
+    st.info("No processed data yet. Use the sidebar to upload and run the split.")
