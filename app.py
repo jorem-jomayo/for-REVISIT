@@ -41,7 +41,6 @@ def classify_rows(df):
     }
 
     total = len(df)
-    # Use sidebar for progress
     progress_bar = st.sidebar.progress(0, text="Classifying rows...")
     status_text = st.sidebar.empty()
 
@@ -90,7 +89,7 @@ def classify_rows(df):
 
 # -------------------------------------------------------------------
 # Matching + copying NOT MATCH rows to NEW DL TYPE
-# The checkbox `include_dl6` controls whether DL5 is matched against DL6
+# The radio option `include_dl6` controls whether DL5 is matched against DL6
 # DL6 is always the final target – never a source
 # -------------------------------------------------------------------
 def add_match_and_copy(sheets, include_dl6=False):
@@ -109,9 +108,7 @@ def add_match_and_copy(sheets, include_dl6=False):
 
     if include_dl6:
         rules.append(("DL5", "DL6", "FOR DL6"))
-        # Note: DL6 is NOT matched against DL1 – it's the last target
 
-    # Compute total rows for progress
     total_rows = 0
     for src, _, _ in rules:
         if src in sheets:
@@ -121,7 +118,6 @@ def add_match_and_copy(sheets, include_dl6=False):
         return
 
     not_matched_rows = []
-    # Use sidebar for progress
     progress_bar = st.sidebar.progress(0, text="Matching rows...")
     status_text = st.sidebar.empty()
     processed = 0
@@ -189,10 +185,7 @@ with st.sidebar:
     uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
     if uploaded_file is not None:
-        st.markdown("**Step 2: Select Month**")
-        # Load and filter data will happen below, but we need to keep the file in session?
-        # We'll process after upload and selection, but we need to keep the loaded df in session state.
-        # For simplicity, we'll load it once and store in session_state.
+        # Load data into session state to persist
         if "df_raw" not in st.session_state or st.session_state.get("uploaded_file_name") != uploaded_file.name:
             try:
                 df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
@@ -228,24 +221,26 @@ with st.sidebar:
             st.info(f"No data for {selected_month}.")
             st.stop()
 
-        # Show row count in sidebar
         st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-        st.markdown("**Step 3: Options**")
-        include_dl6 = st.checkbox(
-            "Include DL5 → DL6 matching",
-            help="When checked, DL5 rows are matched against DL6. "
+        st.markdown("**Step 2: Matching Option**")
+        # Radio button instead of checkbox
+        match_option = st.radio(
+            "DL5 → DL6 matching:",
+            options=["Without DL5→DL6", "With DL5→DL6"],
+            index=0,
+            help="When 'With DL5→DL6' is selected, DL5 rows are matched against DL6. "
                  "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
-                 "When unchecked, DL5 remains a plain sheet without extra columns."
+                 "When 'Without DL5→DL6', DL5 remains a plain sheet without extra columns."
         )
+        include_dl6 = (match_option == "With DL5→DL6")
 
-        st.markdown("**Step 4: Run Processing**")
+        st.markdown("**Step 3: Run Processing**")
         if st.button("Split Data", use_container_width=True):
             with st.spinner("Processing..."):
                 sheets = classify_rows(df_filtered)
                 add_match_and_copy(sheets, include_dl6=include_dl6)
 
-            # Store sheets in session state for display and download
             st.session_state.sheets = sheets
             st.session_state.selected_month = selected_month
             st.success("Processing complete!")
@@ -267,7 +262,7 @@ if "sheets" in st.session_state and st.session_state.sheets is not None:
             else:
                 st.dataframe(df_sheet, use_container_width=True)
 
-    # Download button in main area
+    # Download button
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         for sheet_name, df_sheet in sheets.items():
