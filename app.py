@@ -41,8 +41,8 @@ def classify_rows(df):
     }
 
     total = len(df)
-    progress_bar = st.sidebar.progress(0, text="Classifying rows...")
-    status_text = st.sidebar.empty()
+    progress_bar = st.progress(0, text="Classifying rows...")
+    status_text = st.empty()
 
     for idx, (_, row) in enumerate(df.iterrows()):
         dl_type = row["DL TYPE"]
@@ -89,7 +89,7 @@ def classify_rows(df):
 
 # -------------------------------------------------------------------
 # Matching + copying NOT MATCH rows to NEW DL TYPE
-# The radio option `include_dl6` controls whether DL5 is matched against DL6
+# The checkbox `include_dl6` controls whether DL5 is matched against DL6
 # DL6 is always the final target – never a source
 # -------------------------------------------------------------------
 def add_match_and_copy(sheets, include_dl6=False):
@@ -108,7 +108,9 @@ def add_match_and_copy(sheets, include_dl6=False):
 
     if include_dl6:
         rules.append(("DL5", "DL6", "FOR DL6"))
+        # Note: DL6 is NOT matched against DL1 – it's the last target
 
+    # Compute total rows for progress
     total_rows = 0
     for src, _, _ in rules:
         if src in sheets:
@@ -118,8 +120,8 @@ def add_match_and_copy(sheets, include_dl6=False):
         return
 
     not_matched_rows = []
-    progress_bar = st.sidebar.progress(0, text="Matching rows...")
-    status_text = st.sidebar.empty()
+    progress_bar = st.progress(0, text="Matching rows...")
+    status_text = st.empty()
     processed = 0
 
     for src, tgt, dest_label in rules:
@@ -173,111 +175,81 @@ def add_match_and_copy(sheets, include_dl6=False):
 # -------------------------------------------------------------------
 # Streamlit UI
 # -------------------------------------------------------------------
-st.set_page_config(page_title="NEW DL TYPE - NEW ENDO", layout="wide", page_icon="🆕")
+st.set_page_config(page_title="NEW DL TYPE", layout="wide",page_icon="🆕")
+st.title("🆕 for NEW DL TYPE - NEW ENDO")
 
-# -------------------- SIDEBAR --------------------
-with st.sidebar:
-    st.title("🆕 NEW DL TYPE")
-    st.subheader("NEW ENDO Process")
+uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
-    st.markdown("---")
-    st.markdown("**Step 1: Upload File**")
-    uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
+if uploaded_file is not None:
+    try:
+        df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
+        st.success("File loaded successfully!")
+    except Exception as e:
+        st.error(f"Error reading file: {e}")
+        st.stop()
 
-    if uploaded_file is not None:
-        # Load data into session state to persist
-        if "df_raw" not in st.session_state or st.session_state.get("uploaded_file_name") != uploaded_file.name:
-            try:
-                df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
-                st.session_state.df_raw = df_raw
-                st.session_state.uploaded_file_name = uploaded_file.name
-                st.success("File loaded successfully!")
-            except Exception as e:
-                st.error(f"Error reading file: {e}")
-                st.stop()
-        else:
-            df_raw = st.session_state.df_raw
+    required_cols = ["DL TYPE", "ACCOUNT TYPE", "REMARKS", "ENDO DATE"]
+    missing = [col for col in required_cols if col not in df_raw.columns]
+    if missing:
+        st.error(f"Missing columns: {missing}")
+        st.stop()
 
-        required_cols = ["DL TYPE", "ACCOUNT TYPE", "REMARKS", "ENDO DATE"]
-        missing = [col for col in required_cols if col not in df_raw.columns]
-        if missing:
-            st.error(f"Missing columns: {missing}")
-            st.stop()
+    df_raw["ENDO DATE"] = pd.to_datetime(df_raw["ENDO DATE"], errors="coerce")
+    df_raw["MONTH_YEAR"] = df_raw["ENDO DATE"].dt.strftime("%B %Y")
+    df_valid = df_raw.dropna(subset=["ENDO DATE"]).copy()
 
-        df_raw["ENDO DATE"] = pd.to_datetime(df_raw["ENDO DATE"], errors="coerce")
-        df_raw["MONTH_YEAR"] = df_raw["ENDO DATE"].dt.strftime("%B %Y")
-        df_valid = df_raw.dropna(subset=["ENDO DATE"]).copy()
+    if df_valid.empty:
+        st.warning("No valid ENDO DATE found. Please check your data.")
+        st.stop()
 
-        if df_valid.empty:
-            st.warning("No valid ENDO DATE found. Please check your data.")
-            st.stop()
+    unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
+    selected_month = st.selectbox("Select ENDO DATE month", unique_months)
 
-        unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
-        selected_month = st.selectbox("Select ENDO DATE month", unique_months)
+    df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
 
-        df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
+    if df_filtered.empty:
+        st.info(f"No data for {selected_month}.")
+        st.stop()
 
-        if df_filtered.empty:
-            st.info(f"No data for {selected_month}.")
-            st.stop()
+    st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-        st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
-
-        st.markdown("**Step 2: Matching Option**")
-        # Radio button instead of checkbox
-        match_option = st.radio(
-            "DL5 → DL6 matching:",
-            options=["Without DL5→DL6", "With DL5→DL6"],
-            index=0,
-            help="When 'With DL5→DL6' is selected, DL5 rows are matched against DL6. "
-                 "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
-                 "When 'Without DL5→DL6', DL5 remains a plain sheet without extra columns."
-        )
-        include_dl6 = (match_option == "With DL5→DL6")
-
-        st.markdown("**Step 3: Run Processing**")
-        if st.button("Split Data", use_container_width=True):
-            with st.spinner("Processing..."):
-                sheets = classify_rows(df_filtered)
-                add_match_and_copy(sheets, include_dl6=include_dl6)
-
-            st.session_state.sheets = sheets
-            st.session_state.selected_month = selected_month
-            st.success("Processing complete!")
-
-    else:
-        st.info("Please upload an Excel file to begin.")
-
-# -------------------- MAIN AREA --------------------
-st.title("📊 Split Results")
-
-if "sheets" in st.session_state and st.session_state.sheets is not None:
-    sheets = st.session_state.sheets
-    selected_month = st.session_state.selected_month
-
-    for sheet_name, df_sheet in sheets.items():
-        with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
-            if df_sheet.empty:
-                st.write("No data.")
-            else:
-                st.dataframe(df_sheet, use_container_width=True)
-
-    # Download button
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for sheet_name, df_sheet in sheets.items():
-            if not df_sheet.empty:
-                df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
-            else:
-                pd.DataFrame({"Note": ["No data"]}).to_excel(writer, sheet_name=sheet_name, index=False)
-    output.seek(0)
-
-    st.download_button(
-        label="📥 Download Split File (Excel)",
-        data=output,
-        file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
+    # Checkbox: include DL5→DL6 matching (DL6 is target only)
+    include_dl6 = st.checkbox(
+        "Include DL5 → DL6 matching",
+        help="When checked, DL5 rows are matched against DL6. "
+             "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
+             "When unchecked, DL5 remains a plain sheet without extra columns."
     )
+
+    if st.button("Split Data"):
+        with st.spinner("Processing..."):
+            sheets = classify_rows(df_filtered)
+            add_match_and_copy(sheets, include_dl6=include_dl6)
+
+        st.success("Processing complete!")
+
+        for sheet_name, df_sheet in sheets.items():
+            with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
+                if df_sheet.empty:
+                    st.write("No data.")
+                else:
+                    st.dataframe(df_sheet, use_container_width=True)
+
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            for sheet_name, df_sheet in sheets.items():
+                if not df_sheet.empty:
+                    df_sheet.to_excel(writer, sheet_name=sheet_name, index=False)
+                else:
+                    pd.DataFrame({"Note": ["No data"]}).to_excel(writer, sheet_name=sheet_name, index=False)
+        output.seek(0)
+
+        st.download_button(
+            label="📥 Download Split File (Excel)",
+            data=output,
+            file_name=f"PEN_RATE_Split_{selected_month.replace(' ', '_')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
 else:
-    st.info("No processed data yet. Use the sidebar to upload and run the split.")
+    st.info("Please upload an Excel file to begin.")
