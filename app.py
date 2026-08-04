@@ -5,7 +5,7 @@ from datetime import datetime
 import re
 
 # -------------------------------------------------------------------
-# Helper: clean text
+# Helper: clean text (removes hidden chars and extra spaces)
 # -------------------------------------------------------------------
 def clean_text(val):
     if pd.isna(val):
@@ -19,7 +19,7 @@ def clean_text(val):
     return str(val).strip()
 
 # -------------------------------------------------------------------
-# Add MATCHING column
+# Add MATCHING column (Excel-style MATCH)
 # -------------------------------------------------------------------
 def add_matching_columns(sheets):
     match_rules = [
@@ -41,12 +41,17 @@ def add_matching_columns(sheets):
                 src_df["MATCHING"] = "Target sheet empty"
             continue
 
+        # Use the first column as the key (like column A in Excel)
         key_col = src_df.columns[0]
         tgt_key_col = tgt_df.columns[0]
+
+        # Map target values to Excel row numbers (index + 2)
         match_map = dict(zip(tgt_df[tgt_key_col], tgt_df.index + 2))
+
         src_df["MATCHING"] = src_df[key_col].map(match_map)
         src_df["MATCHING"] = src_df["MATCHING"].fillna("Not found").astype(str)
 
+    # For sheets without a matching rule, add an empty MATCHING column
     for name, df in sheets.items():
         if "MATCHING" not in df.columns and not df.empty:
             df["MATCHING"] = "No rule"
@@ -54,7 +59,7 @@ def add_matching_columns(sheets):
     return sheets
 
 # -------------------------------------------------------------------
-# Main classification
+# Main classification function (splits into sheets)
 # -------------------------------------------------------------------
 def classify_rows(df):
     df_clean = df.copy()
@@ -113,7 +118,7 @@ def classify_rows(df):
     progress_bar.empty()
     status_text.empty()
 
-    # Convert to DataFrames
+    # Convert lists to DataFrames
     for key in sheets:
         if sheets[key]:
             sheets[key] = pd.DataFrame(sheets[key])
@@ -173,7 +178,7 @@ if uploaded_file is not None:
 
         st.success("Splitting complete!")
 
-        # Display each sheet
+        # ---------- Show each sheet in its own expander ----------
         for sheet_name, df_sheet in sheets.items():
             with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
                 if df_sheet.empty:
@@ -181,12 +186,12 @@ if uploaded_file is not None:
                 else:
                     st.dataframe(df_sheet, use_container_width=True)
 
-        # Combine all sheets into one DataFrame with a "SHEET" column
+        # ---------- Combine all sheets into one CSV ----------
         all_data = []
         for sheet_name, df_sheet in sheets.items():
             if not df_sheet.empty:
                 df_copy = df_sheet.copy()
-                df_copy.insert(0, "SHEET", sheet_name)  # add SHEET column at front
+                df_copy.insert(0, "SHEET", sheet_name)   # Add sheet name as first column
                 all_data.append(df_copy)
 
         if all_data:
