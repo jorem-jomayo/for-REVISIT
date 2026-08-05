@@ -10,6 +10,10 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 # Helper: Send a desktop notification using pure JavaScript
 # -------------------------------------------------------------------
 def send_notification(title, body):
+    """
+    Injects JavaScript to send a browser/OS notification.
+    Automatically requests permission if not already granted.
+    """
     st.components.v1.html(f"""
     <script>
     (function() {{
@@ -24,6 +28,7 @@ def send_notification(title, body):
                 }});
             }}
         }}
+        // If the page is already loaded, send immediately. Otherwise, wait.
         if (document.readyState === "complete") {{
             send();
         }} else {{
@@ -31,7 +36,7 @@ def send_notification(title, body):
         }}
     }})();
     </script>
-    """, height=0)
+    """, height=0)  # height=0 hides the HTML component
 
 # -------------------------------------------------------------------
 # Helper: clean text
@@ -195,90 +200,6 @@ def add_match_and_copy(sheets, include_dl6=False):
 st.set_page_config(page_title="NEW DL TYPE", layout="wide", page_icon="🆕")
 st.title("🆕 for NEW DL TYPE - NEW ENDO")
 
-# --- Custom CSS for the checkbox (with !important to override Streamlit) ---
-st.markdown("""
-<style>
-/* Wrapper for the checkbox */
-.ui-checkbox-container {
-  --primary-color: #1677ff;
-  --secondary-color: #fff;
-  --primary-hover-color: #4096ff;
-  --checkbox-diameter: 20px;
-  --checkbox-border-radius: 5px;
-  --checkbox-border-color: #d9d9d9;
-  --checkbox-border-width: 1px;
-  --checkbox-border-style: solid;
-  --checkmark-size: 1.2;
-}
-
-/* Target the checkbox input inside the container */
-.ui-checkbox-container input[type="checkbox"] {
-  -webkit-appearance: none !important;
-  -moz-appearance: none !important;
-  appearance: none !important;
-  width: var(--checkbox-diameter) !important;
-  height: var(--checkbox-diameter) !important;
-  border-radius: var(--checkbox-border-radius) !important;
-  background: var(--secondary-color) !important;
-  border: var(--checkbox-border-width) var(--checkbox-border-style) var(--checkbox-border-color) !important;
-  transition: all 0.3s !important;
-  cursor: pointer !important;
-  position: relative !important;
-  margin-right: 8px !important;
-  flex-shrink: 0 !important;  /* prevent shrinking in flex layout */
-}
-
-/* Pseudo-elements for checkmark and ripple */
-.ui-checkbox-container input[type="checkbox"]::after {
-  content: "" !important;
-  position: absolute !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  box-shadow: 0 0 0 calc(var(--checkbox-diameter) / 2.5) var(--primary-color) !important;
-  border-radius: inherit !important;
-  opacity: 0 !important;
-  transition: all 0.5s cubic-bezier(0.12, 0.4, 0.29, 1.46) !important;
-}
-
-.ui-checkbox-container input[type="checkbox"]::before {
-  top: 40% !important;
-  left: 50% !important;
-  content: "" !important;
-  position: absolute !important;
-  width: 4px !important;
-  height: 7px !important;
-  border-right: 2px solid var(--secondary-color) !important;
-  border-bottom: 2px solid var(--secondary-color) !important;
-  transform: translate(-50%, -50%) rotate(45deg) scale(0) !important;
-  opacity: 0 !important;
-  transition: all 0.1s cubic-bezier(0.71, -0.46, 0.88, 0.6), opacity 0.1s !important;
-}
-
-.ui-checkbox-container input[type="checkbox"]:hover {
-  border-color: var(--primary-color) !important;
-}
-
-.ui-checkbox-container input[type="checkbox"]:checked {
-  background: var(--primary-color) !important;
-  border-color: transparent !important;
-}
-
-.ui-checkbox-container input[type="checkbox"]:checked::before {
-  opacity: 1 !important;
-  transform: translate(-50%, -50%) rotate(45deg) scale(var(--checkmark-size)) !important;
-  transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) 0.1s !important;
-}
-
-.ui-checkbox-container input[type="checkbox"]:active:not(:checked)::after {
-  transition: none !important;
-  box-shadow: none !important;
-  opacity: 1 !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
 # Request notification permission early (via JS)
 st.components.v1.html("""
 <script>
@@ -295,6 +216,7 @@ if uploaded_file is not None:
         df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
         st.success("File loaded successfully!")
 
+        # --- NOTIFICATION 1: File loaded ---
         if not st.session_state.get("file_loaded_notified", False):
             send_notification("📂 File Loaded", "Excel file loaded successfully!")
             st.session_state.file_loaded_notified = True
@@ -320,6 +242,7 @@ if uploaded_file is not None:
     unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
     selected_month = st.selectbox("Select ENDO DATE month", unique_months)
 
+    # --- NOTIFICATION 2: Month selected ---
     if "last_month" not in st.session_state:
         st.session_state.last_month = None
 
@@ -335,18 +258,12 @@ if uploaded_file is not None:
 
     st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-    # -----------------------------------------------------------------
-    # CUSTOM STYLED CHECKBOX – wrapped in a div with the class
-    # -----------------------------------------------------------------
-    st.markdown('<div class="ui-checkbox-container">', unsafe_allow_html=True)
     include_dl6 = st.checkbox(
         "Include DL5 → DL6 matching",
         help="When checked, DL5 rows are matched against DL6. "
              "NOT MATCH rows from DL5 get 'FOR DL6' and are copied to NEW DL TYPE. "
-             "When unchecked, DL5 remains a plain sheet without extra columns.",
-        key="include_dl6_checkbox"
+             "When unchecked, DL5 remains a plain sheet without extra columns."
     )
-    st.markdown('</div>', unsafe_allow_html=True)
 
     if st.button("Split Data"):
         with st.spinner("Processing..."):
@@ -355,6 +272,7 @@ if uploaded_file is not None:
 
         st.success("Processing complete!")
 
+        # --- NOTIFICATION 3: Processing complete ---
         send_notification("✅ Processing Complete", "Data split and ready for download!")
 
         for sheet_name, df_sheet in sheets.items():
