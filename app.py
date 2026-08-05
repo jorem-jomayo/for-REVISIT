@@ -10,10 +10,6 @@ from openpyxl.utils.dataframe import dataframe_to_rows
 # Helper: Send a desktop notification using pure JavaScript
 # -------------------------------------------------------------------
 def send_notification(title, body):
-    """
-    Injects JavaScript to send a browser/OS notification.
-    Automatically requests permission if not already granted.
-    """
     st.components.v1.html(f"""
     <script>
     (function() {{
@@ -199,102 +195,86 @@ def add_match_and_copy(sheets, include_dl6=False):
 st.set_page_config(page_title="NEW DL TYPE", layout="wide", page_icon="🆕")
 st.title("🆕 for NEW DL TYPE - NEW ENDO")
 
-# --- Inject custom CSS for the stylish checkbox ---
+# --- Custom CSS for the checkbox (with !important to override Streamlit) ---
 st.markdown("""
 <style>
-/* checkbox settings 👇 */
+/* Wrapper for the checkbox */
 .ui-checkbox-container {
   --primary-color: #1677ff;
   --secondary-color: #fff;
   --primary-hover-color: #4096ff;
-  /* checkbox */
   --checkbox-diameter: 20px;
   --checkbox-border-radius: 5px;
   --checkbox-border-color: #d9d9d9;
   --checkbox-border-width: 1px;
   --checkbox-border-style: solid;
-  /* checkmark */
   --checkmark-size: 1.2;
 }
 
-/* Apply styles to the checkbox input inside the container */
+/* Target the checkbox input inside the container */
 .ui-checkbox-container input[type="checkbox"] {
-  -webkit-appearance: none;
-  -moz-appearance: none;
-  appearance: none;
-  width: var(--checkbox-diameter);
-  height: var(--checkbox-diameter);
-  border-radius: var(--checkbox-border-radius);
-  background: var(--secondary-color);
-  border: var(--checkbox-border-width) var(--checkbox-border-style) var(--checkbox-border-color);
-  -webkit-transition: all 0.3s;
-  -o-transition: all 0.3s;
-  transition: all 0.3s;
-  cursor: pointer;
-  position: relative;
-  margin-right: 8px;  /* spacing between checkbox and label */
+  -webkit-appearance: none !important;
+  -moz-appearance: none !important;
+  appearance: none !important;
+  width: var(--checkbox-diameter) !important;
+  height: var(--checkbox-diameter) !important;
+  border-radius: var(--checkbox-border-radius) !important;
+  background: var(--secondary-color) !important;
+  border: var(--checkbox-border-width) var(--checkbox-border-style) var(--checkbox-border-color) !important;
+  transition: all 0.3s !important;
+  cursor: pointer !important;
+  position: relative !important;
+  margin-right: 8px !important;
+  flex-shrink: 0 !important;  /* prevent shrinking in flex layout */
 }
 
+/* Pseudo-elements for checkmark and ripple */
 .ui-checkbox-container input[type="checkbox"]::after {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  -webkit-box-shadow: 0 0 0 calc(var(--checkbox-diameter) / 2.5) var(--primary-color);
-  box-shadow: 0 0 0 calc(var(--checkbox-diameter) / 2.5) var(--primary-color);
-  border-radius: inherit;
-  opacity: 0;
-  -webkit-transition: all 0.5s cubic-bezier(0.12, 0.4, 0.29, 1.46);
-  -o-transition: all 0.5s cubic-bezier(0.12, 0.4, 0.29, 1.46);
-  transition: all 0.5s cubic-bezier(0.12, 0.4, 0.29, 1.46);
+  content: "" !important;
+  position: absolute !important;
+  top: 0 !important;
+  left: 0 !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  box-shadow: 0 0 0 calc(var(--checkbox-diameter) / 2.5) var(--primary-color) !important;
+  border-radius: inherit !important;
+  opacity: 0 !important;
+  transition: all 0.5s cubic-bezier(0.12, 0.4, 0.29, 1.46) !important;
 }
 
 .ui-checkbox-container input[type="checkbox"]::before {
-  top: 40%;
-  left: 50%;
-  content: "";
-  position: absolute;
-  width: 4px;
-  height: 7px;
-  border-right: 2px solid var(--secondary-color);
-  border-bottom: 2px solid var(--secondary-color);
-  -webkit-transform: translate(-50%, -50%) rotate(45deg) scale(0);
-  -ms-transform: translate(-50%, -50%) rotate(45deg) scale(0);
-  transform: translate(-50%, -50%) rotate(45deg) scale(0);
-  opacity: 0;
-  -webkit-transition: all 0.1s cubic-bezier(0.71, -0.46, 0.88, 0.6), opacity 0.1s;
-  -o-transition: all 0.1s cubic-bezier(0.71, -0.46, 0.88, 0.6), opacity 0.1s;
-  transition: all 0.1s cubic-bezier(0.71, -0.46, 0.88, 0.6), opacity 0.1s;
+  top: 40% !important;
+  left: 50% !important;
+  content: "" !important;
+  position: absolute !important;
+  width: 4px !important;
+  height: 7px !important;
+  border-right: 2px solid var(--secondary-color) !important;
+  border-bottom: 2px solid var(--secondary-color) !important;
+  transform: translate(-50%, -50%) rotate(45deg) scale(0) !important;
+  opacity: 0 !important;
+  transition: all 0.1s cubic-bezier(0.71, -0.46, 0.88, 0.6), opacity 0.1s !important;
 }
 
 .ui-checkbox-container input[type="checkbox"]:hover {
-  border-color: var(--primary-color);
+  border-color: var(--primary-color) !important;
 }
 
 .ui-checkbox-container input[type="checkbox"]:checked {
-  background: var(--primary-color);
-  border-color: transparent;
+  background: var(--primary-color) !important;
+  border-color: transparent !important;
 }
 
 .ui-checkbox-container input[type="checkbox"]:checked::before {
-  opacity: 1;
-  -webkit-transform: translate(-50%, -50%) rotate(45deg) scale(var(--checkmark-size));
-  -ms-transform: translate(-50%, -50%) rotate(45deg) scale(var(--checkmark-size));
-  transform: translate(-50%, -50%) rotate(45deg) scale(var(--checkmark-size));
-  -webkit-transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) 0.1s;
-  -o-transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) 0.1s;
-  transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) 0.1s;
+  opacity: 1 !important;
+  transform: translate(-50%, -50%) rotate(45deg) scale(var(--checkmark-size)) !important;
+  transition: all 0.2s cubic-bezier(0.12, 0.4, 0.29, 1.46) 0.1s !important;
 }
 
 .ui-checkbox-container input[type="checkbox"]:active:not(:checked)::after {
-  -webkit-transition: none;
-  -o-transition: none;
-  -webkit-box-shadow: none;
-  box-shadow: none;
-  transition: none;
-  opacity: 1;
+  transition: none !important;
+  box-shadow: none !important;
+  opacity: 1 !important;
 }
 </style>
 """, unsafe_allow_html=True)
