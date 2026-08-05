@@ -5,7 +5,38 @@ from datetime import datetime
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
-from streamlit_push_notifications import send_push, request_permission  # <-- NEW
+
+# -------------------------------------------------------------------
+# Helper: Send a desktop notification using pure JavaScript
+# -------------------------------------------------------------------
+def send_notification(title, body):
+    """
+    Injects JavaScript to send a browser/OS notification.
+    Automatically requests permission if not already granted.
+    """
+    st.components.v1.html(f"""
+    <script>
+    (function() {{
+        function send() {{
+            if (Notification.permission === "granted") {{
+                new Notification("{title}", {{ body: "{body}" }});
+            }} else if (Notification.permission !== "denied") {{
+                Notification.requestPermission().then(permission => {{
+                    if (permission === "granted") {{
+                        new Notification("{title}", {{ body: "{body}" }});
+                    }}
+                }});
+            }}
+        }}
+        // If the page is already loaded, send immediately. Otherwise, wait.
+        if (document.readyState === "complete") {{
+            send();
+        }} else {{
+            window.addEventListener("load", send);
+        }}
+    }})();
+    </script>
+    """, height=0)  # height=0 hides the HTML component
 
 # -------------------------------------------------------------------
 # Helper: clean text
@@ -15,7 +46,7 @@ def clean_text(val):
         return ""
     if isinstance(val, str):
         import re
-        s = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', val)  # remove control chars
+        s = re.sub(r'[\x00-\x1f\x7f-\x9f]', '', val)
         s = s.strip()
         while "  " in s:
             s = s.replace("  ", " ")
@@ -90,16 +121,8 @@ def classify_rows(df):
 
 # -------------------------------------------------------------------
 # Matching + copying NOT MATCH rows to NEW DL TYPE
-# The checkbox `include_dl6` controls whether DL5 is matched against DL6
-# DL6 is always the final target – never a source
 # -------------------------------------------------------------------
 def add_match_and_copy(sheets, include_dl6=False):
-    """
-    Base rules (always applied):
-        DL1 → DL2,  DL2 → DL3,  DL4 CTS → DL4 CTS REV,  DL4 REM → DL5
-    If include_dl6 is True, also add:
-        DL5 → DL6   (DL6 is target only, never source)
-    """
     rules = [
         ("DL1", "DL2", "FOR DL2"),
         ("DL2", "DL3", "FOR DL3"),
@@ -109,9 +132,7 @@ def add_match_and_copy(sheets, include_dl6=False):
 
     if include_dl6:
         rules.append(("DL5", "DL6", "FOR DL6"))
-        # Note: DL6 is NOT matched against DL1 – it's the last target
 
-    # Compute total rows for progress
     total_rows = 0
     for src, _, _ in rules:
         if src in sheets:
@@ -179,10 +200,14 @@ def add_match_and_copy(sheets, include_dl6=False):
 st.set_page_config(page_title="NEW DL TYPE", layout="wide", page_icon="🆕")
 st.title("🆕 for NEW DL TYPE - NEW ENDO")
 
-# Request permission for notifications (only once)
-if "permission_requested" not in st.session_state:
-    request_permission()
-    st.session_state.permission_requested = True
+# Request notification permission early (via JS)
+st.components.v1.html("""
+<script>
+if (Notification.permission === "default") {
+    Notification.requestPermission();
+}
+</script>
+""", height=0)
 
 uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
@@ -191,13 +216,9 @@ if uploaded_file is not None:
         df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
         st.success("File loaded successfully!")
 
-        # --- NOTIFICATION 1: File loaded successfully ---
+        # --- NOTIFICATION 1: File loaded ---
         if not st.session_state.get("file_loaded_notified", False):
-            send_push(
-                title="📂 File Loaded",
-                body="Excel file loaded successfully!",
-                # sound_path can be added if you want a custom sound
-            )
+            send_notification("📂 File Loaded", "Excel file loaded successfully!")
             st.session_state.file_loaded_notified = True
 
     except Exception as e:
@@ -221,15 +242,12 @@ if uploaded_file is not None:
     unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
     selected_month = st.selectbox("Select ENDO DATE month", unique_months)
 
-    # --- NOTIFICATION 2: When a month is selected (only if changed) ---
+    # --- NOTIFICATION 2: Month selected ---
     if "last_month" not in st.session_state:
         st.session_state.last_month = None
 
     if selected_month and selected_month != st.session_state.last_month:
-        send_push(
-            title="📅 Month Selected",
-            body=f"You selected: {selected_month}",
-        )
+        send_notification("📅 Month Selected", f"You selected: {selected_month}")
         st.session_state.last_month = selected_month
 
     df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
@@ -240,7 +258,6 @@ if uploaded_file is not None:
 
     st.write(f"**Rows for {selected_month}:** {len(df_filtered)}")
 
-    # Checkbox: include DL5→DL6 matching (DL6 is target only)
     include_dl6 = st.checkbox(
         "Include DL5 → DL6 matching",
         help="When checked, DL5 rows are matched against DL6. "
@@ -256,10 +273,7 @@ if uploaded_file is not None:
         st.success("Processing complete!")
 
         # --- NOTIFICATION 3: Processing complete ---
-        send_push(
-            title="✅ Processing Complete",
-            body="Data split and ready for download!",
-        )
+        send_notification("✅ Processing Complete", "Data split and ready for download!")
 
         for sheet_name, df_sheet in sheets.items():
             with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
