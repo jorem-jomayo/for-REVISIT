@@ -5,6 +5,7 @@ from datetime import datetime
 import openpyxl
 from openpyxl import Workbook
 from openpyxl.utils.dataframe import dataframe_to_rows
+from streamlit_push_notifications import send_push, request_permission  # <-- NEW
 
 # -------------------------------------------------------------------
 # Helper: clean text
@@ -175,8 +176,13 @@ def add_match_and_copy(sheets, include_dl6=False):
 # -------------------------------------------------------------------
 # Streamlit UI
 # -------------------------------------------------------------------
-st.set_page_config(page_title="NEW DL TYPE", layout="wide",page_icon="🆕")
+st.set_page_config(page_title="NEW DL TYPE", layout="wide", page_icon="🆕")
 st.title("🆕 for NEW DL TYPE - NEW ENDO")
+
+# Request permission for notifications (only once)
+if "permission_requested" not in st.session_state:
+    request_permission()
+    st.session_state.permission_requested = True
 
 uploaded_file = st.file_uploader("Upload your PEN RATE.xlsx file", type=["xlsx"])
 
@@ -184,6 +190,16 @@ if uploaded_file is not None:
     try:
         df_raw = pd.read_excel(uploaded_file, sheet_name=0, engine="openpyxl")
         st.success("File loaded successfully!")
+
+        # --- NOTIFICATION 1: File loaded successfully ---
+        if not st.session_state.get("file_loaded_notified", False):
+            send_push(
+                title="📂 File Loaded",
+                body="Excel file loaded successfully!",
+                # sound_path can be added if you want a custom sound
+            )
+            st.session_state.file_loaded_notified = True
+
     except Exception as e:
         st.error(f"Error reading file: {e}")
         st.stop()
@@ -204,6 +220,17 @@ if uploaded_file is not None:
 
     unique_months = sorted(df_valid["MONTH_YEAR"].unique(), key=lambda x: datetime.strptime(x, "%B %Y"))
     selected_month = st.selectbox("Select ENDO DATE month", unique_months)
+
+    # --- NOTIFICATION 2: When a month is selected (only if changed) ---
+    if "last_month" not in st.session_state:
+        st.session_state.last_month = None
+
+    if selected_month and selected_month != st.session_state.last_month:
+        send_push(
+            title="📅 Month Selected",
+            body=f"You selected: {selected_month}",
+        )
+        st.session_state.last_month = selected_month
 
     df_filtered = df_valid[df_valid["MONTH_YEAR"] == selected_month].copy()
 
@@ -227,6 +254,12 @@ if uploaded_file is not None:
             add_match_and_copy(sheets, include_dl6=include_dl6)
 
         st.success("Processing complete!")
+
+        # --- NOTIFICATION 3: Processing complete ---
+        send_push(
+            title="✅ Processing Complete",
+            body="Data split and ready for download!",
+        )
 
         for sheet_name, df_sheet in sheets.items():
             with st.expander(f"📄 {sheet_name}  ({len(df_sheet)} rows)"):
